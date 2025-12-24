@@ -5,6 +5,8 @@ import google.generativeai as genai
 from PIL import Image
 import io
 import pandas as pd
+from fpdf import FPDF
+import tempfile
 
 # --- SETUP HALAMAN ---
 st.set_page_config(page_title="Smart Chart AI by SEJ", layout="wide")
@@ -22,54 +24,77 @@ def check_login():
     col1, col2 = st.columns(2)
     with col1:
         username = st.text_input("Username")
-        password = st.text_input("password", type="password")
+        password = st.text_input("Password", type="password")
         
         if st.button("Masuk Sistem 🚀"):
-            # 1. Ambil senarai passwords dari secrets
-            # Jika tiada, buat dictionary kosong (fail-safe)
             users_db = st.secrets.get("passwords", {})
-
-            # 2. Check adakah username wujud & password betul
             if username in users_db and users_db[username] == password:
                 st.session_state.logged_in = True
-                st.session_state.current_user = username # Simpan nama siapa yang login
+                st.session_state.current_user = username
                 st.rerun()
-                
             else:
                 st.error("❌ Username atau Password salah!")
 
-# JIKA BELUM LOGIN, TAHAN DI SINI
 if not st.session_state.logged_in:
     check_login()
-    st.stop() # Berhenti baca kod di bawah selagi tak login
+    st.stop()
 
 # ==========================================
-# 🔓 APLIKASI UTAMA (HANYA MUNCUL SELEPAS LOGIN)
+# 🔓 APLIKASI UTAMA
 # ==========================================
+
+# --- FUNGSI BUAT PDF ---
+def create_pdf(ticker, company_name, price, analysis_text, chart_image):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    
+    # Tajuk
+    pdf.cell(200, 10, txt=f"Laporan Analisis Saham: {ticker}", ln=True, align='C')
+    pdf.set_font("Arial", 'I', 12)
+    pdf.cell(200, 10, txt=f"Syarikat: {company_name} | Harga: {price}", ln=True, align='C')
+    pdf.ln(10)
+    
+    # Masukkan Gambar Chart
+    # Kita perlu simpan gambar sementara (temp) sebab FPDF nak baca fail
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_file:
+        chart_image.save(tmp_file.name)
+        pdf.image(tmp_file.name, x=15, y=40, w=180)
+    
+    # Pindah ke bawah gambar
+    pdf.set_y(150)
+    
+    # Masukkan Teks Analisis
+    pdf.set_font("Arial", 'B', 14)
+    pdf.cell(200, 10, txt="Ulasan AI:", ln=True, align='L')
+    pdf.set_font("Arial", size=11)
+    
+    # Bersihkan teks (buang emoji/bold markdown yang tak support PDF biasa)
+    clean_text = analysis_text.replace("*", "").replace("#", "")
+    # Encode latin-1 untuk elak error huruf pelik, ignore jika error
+    clean_text = clean_text.encode('latin-1', 'replace').decode('latin-1')
+    
+    pdf.multi_cell(0, 7, txt=clean_text)
+    
+    return pdf.output(dest='S').encode('latin-1')
 
 # --- HEADER & SIDEBAR ---
 current_user = st.session_state.get("current_user", "Tetamu")
 st.sidebar.markdown(f"## 👤 Pengguna: **{current_user.upper()}**")
+if st.sidebar.button("Log Keluar"):
+    st.session_state.logged_in = False
+    st.rerun()
 
 st.sidebar.divider()
 st.sidebar.title("⚙️ Tetapan")
 
-# --- FUNGSI BANTUAN ---
-def format_large_number(num):
-    if num is None: return "Tiada Data"
-    if num >= 1_000_000_000: return f"{num / 1_000_000_000:.2f}B"
-    elif num >= 1_000_000: return f"{num / 1_000_000:.2f}M"
-    return str(num)
-
-# --- LOGIC AUTO-LOGIN API KEY (RAHSIA) ---
+# --- LOGIC AUTO-LOGIN ---
 api_key = None
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
     st.sidebar.success("✅ API Key Dikesan")
 else:
     api_key = st.sidebar.text_input("Masukkan Google Gemini API Key", type="password")
-    if not api_key:
-        st.sidebar.warning("⚠️ Sila set secrets.toml")
 
 # --- AUTO-DETECT MODEL ---
 available_models = []
@@ -82,23 +107,17 @@ if api_key:
                     available_models.append(m.name)
     except Exception:
         pass
-
-if not available_models:
-    available_models = ["models/gemini-1.5-flash"]
-
+if not available_models: available_models = ["models/gemini-1.5-flash"]
 selected_model = st.sidebar.selectbox("Pilih Model AI", available_models, index=0)
 
 # --- PILIHAN PASARAN ---
 st.sidebar.divider()
 market_type = st.sidebar.radio("Pilih Pasaran:", ["🇺🇸 US Market", "🇲🇾 Bursa Malaysia", "🇮🇩 Indonesia"])
-
 st.title("📈 Smart Chart AI (Pro)")
-st.caption(f"Model: {selected_model} | Pasaran: {market_type} | Powered by SEJ")
+st.caption(f"Model: {selected_model} | Powered by SEJ")
 
-# --- INPUT PENGGUNA ---
+# --- INPUT ---
 col1, col2 = st.columns([1, 3])
-
-# KAMUS PINTAR
 bursa_mapping = {
     "MAYBANK": "1155", "PBBANK": "1295", "CIMB": "1023", "TENAGA": "5347",
     "PCHEM": "5183", "IHH": "5225", "CELCOMDIGI": "6947", "DIGI": "6947",
@@ -110,33 +129,35 @@ bursa_mapping = {
 
 with col1:
     default_ticker = "5347" if "Malaysia" in market_type else "TSLA"
-    st.info("💡 Tip: Taip NAMA (contoh: TENAGA) atau NOMBOR.")
+    st.info("💡 Tip: Taip NAMA atau NOMBOR.")
     raw_ticker = st.text_input("Simbol / Nama Saham", value=default_ticker).upper()
     period = st.selectbox("Tempoh Masa", ["3mo", "6mo", "1y"], index=1)
     analyze_btn = st.button("🚀 Analisa Penuh")
 
-# --- LOGIC PROCESSSING ---
+# --- LOGIC UTAMA ---
 ticker = raw_ticker.strip()
 if "Malaysia" in market_type:
-    if ticker in bursa_mapping:
-        ticker = bursa_mapping[ticker]
-if "Malaysia" in market_type and not ticker.endswith(".KL"):
-    ticker += ".KL"
-elif "Indonesia" in market_type and not ticker.endswith(".JK"):
-    ticker += ".JK"
+    if ticker in bursa_mapping: ticker = bursa_mapping[ticker]
+if "Malaysia" in market_type and not ticker.endswith(".KL"): ticker += ".KL"
+elif "Indonesia" in market_type and not ticker.endswith(".JK"): ticker += ".JK"
 
-# --- FUNGSI UTAMA ---
+# --- FUNGSI BANTUAN ---
+def format_large_number(num):
+    if num is None: return "Tiada Data"
+    if num >= 1_000_000_000: return f"{num / 1_000_000_000:.2f}B"
+    elif num >= 1_000_000: return f"{num / 1_000_000:.2f}M"
+    return str(num)
+
 if analyze_btn:
     if not api_key:
         st.error("⚠️ API Key tiada.")
     else:
         genai.configure(api_key=api_key)
-        
         with st.spinner(f"Sedang mengumpul data {ticker}..."):
             try:
                 ticker_obj = yf.Ticker(ticker)
                 
-                # 1. AMBIL DATA FUNDAMENTAL
+                # 1. Fundamental
                 info = ticker_obj.info
                 company_name = info.get('longName', ticker)
                 sector = info.get('sector', 'Tidak Diketahui')
@@ -152,9 +173,8 @@ if analyze_btn:
                 m2.metric("PE Ratio", pe_ratio if pe_ratio != 'N/A' else "-")
                 m3.metric("Dividend Yield", div_yield)
 
-                # 2. AMBIL DATA CHART
+                # 2. Chart Data
                 data = ticker_obj.history(period=period)
-                
                 if data.empty:
                     st.error(f"❌ Data Chart kosong untuk '{ticker}'.")
                 else:
@@ -163,39 +183,31 @@ if analyze_btn:
                     try: last_price = float(data['Close'].iloc[-1])
                     except: last_price = 0.0
 
-                    # 3. LUKIS CHART
+                    # 3. Lukis Chart
                     m_style = mpf.make_mpf_style(base_mpf_style='yahoo', rc={'font.size': 10})
                     buf = io.BytesIO()
                     my_hlines = dict(hlines=[last_price], colors=['red'], linestyle='dashed', linewidths=1.0)
-                    
-                    mpf.plot(
-                        data, type='candle', style=m_style, volume=True, mav=(20, 50),
-                        hlines=my_hlines, 
-                        savefig=dict(fname=buf, dpi=300, bbox_inches='tight'),
-                        title=f"\n{ticker} - Price: {last_price:.2f}",
-                        tight_layout=True
-                    )
+                    mpf.plot(data, type='candle', style=m_style, volume=True, mav=(20, 50),
+                        hlines=my_hlines, savefig=dict(fname=buf, dpi=300, bbox_inches='tight'),
+                        title=f"\n{ticker} - Price: {last_price:.2f}", tight_layout=True)
                     buf.seek(0)
                     image = Image.open(buf)
                     
                     with col2:
                         st.image(image, use_container_width=True, caption=f"Carta Harian: {company_name}")
                     
-                    # 4. ANALISIS AI
-                    with st.spinner(f"🤖 AI sedang menilai Kesihatan Syarikat & Graf..."):
+                    # 4. AI Analysis
+                    with st.spinner(f"🤖 AI sedang menulis laporan..."):
                         model = genai.GenerativeModel(selected_model)
                         prompt = f"""
                         Bertindak sebagai Pengurus Dana Professional.
                         
                         DATA FUNDAMENTAL:
-                        - Nama: {company_name}
-                        - Sektor: {sector}
-                        - Market Cap: {market_cap}
-                        - PE Ratio: {pe_ratio}
-                        - Dividen: {div_yield}
+                        - Nama: {company_name} | Sektor: {sector}
+                        - Market Cap: {market_cap} | PE Ratio: {pe_ratio} | Dividen: {div_yield}
 
                         DATA TEKNIKAL:
-                        - Harga Semasa: {last_price:.2f} (Lihat Chart)
+                        - Harga Semasa: {last_price:.2f}
                         - Biru = EMA 20, Oren = EMA 50.
 
                         Analisis dalam Bahasa Melayu:
@@ -205,10 +217,23 @@ if analyze_btn:
                         4. **Keputusan**: BUY / SELL / WAIT?
                         """
                         response = model.generate_content([prompt, image])
+                        
+                        # Papar Analisis
                         with col2:
                             st.divider()
                             st.subheader("📊 Analisis Penuh:")
                             st.markdown(response.text)
+                            
+                            # --- BUTANG DOWNLOAD PDF (FEATURE BARU) ---
+                            st.divider()
+                            pdf_bytes = create_pdf(ticker, company_name, f"{last_price:.2f}", response.text, image)
+                            
+                            st.download_button(
+                                label="📥 Download Laporan PDF",
+                                data=pdf_bytes,
+                                file_name=f"Analisis_{ticker}.pdf",
+                                mime="application/pdf"
+                            )
 
             except Exception as e:
                 st.error(f"Ralat Sistem: {e}")
