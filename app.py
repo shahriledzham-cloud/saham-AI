@@ -6,6 +6,54 @@ from PIL import Image
 import io
 import pandas as pd
 
+# --- SETUP HALAMAN ---
+st.set_page_config(page_title="Smart Chart AI by SEJ", layout="wide")
+
+# ==========================================
+# 🔒 SISTEM LOGIN (GATEKEEPER)
+# ==========================================
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+def check_login():
+    # Ambil username/password dari secrets
+    # Jika tiada dalam secrets, guna default 'admin'/'admin' (fail-safe)
+    sec_user = st.secrets.get("APP_USERNAME", "admin")
+    sec_pass = st.secrets.get("APP_PASSWORD", "admin")
+
+    st.title("🔒 Login Diperlukan")
+    st.markdown("Sila masukkan ID Pengguna untuk akses sistem **Smart Chart AI by SEJ**.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        
+        if st.button("Masuk Sistem 🚀"):
+            if username == sec_user and password == sec_pass:
+                st.session_state.logged_in = True
+                st.rerun() # Refresh page untuk masuk
+            else:
+                st.error("❌ Username atau Password salah!")
+
+# JIKA BELUM LOGIN, TAHAN DI SINI
+if not st.session_state.logged_in:
+    check_login()
+    st.stop() # Berhenti baca kod di bawah selagi tak login
+
+# ==========================================
+# 🔓 APLIKASI UTAMA (HANYA MUNCUL SELEPAS LOGIN)
+# ==========================================
+
+# --- HEADER & SIDEBAR ---
+st.sidebar.markdown("## 👨‍💻 Pencipta: **SEJ**")
+if st.sidebar.button("Log Keluar (Logout)"):
+    st.session_state.logged_in = False
+    st.rerun()
+
+st.sidebar.divider()
+st.sidebar.title("⚙️ Tetapan")
+
 # --- FUNGSI BANTUAN ---
 def format_large_number(num):
     if num is None: return "Tiada Data"
@@ -13,26 +61,15 @@ def format_large_number(num):
     elif num >= 1_000_000: return f"{num / 1_000_000:.2f}M"
     return str(num)
 
-# --- SETUP HALAMAN ---
-st.set_page_config(page_title="Smart Chart AI by SEJ", layout="wide")
-
-# ==========================================
-# 🟢 NAMA PENCIPTA (DI ATAS KIRI)
-# ==========================================
-st.sidebar.markdown("## 👨‍💻 FROM: **SEJ**")
-st.sidebar.divider() # Garisan pemisah cantik
-
-st.sidebar.title("⚙️ Tetapan")
-
-# --- LOGIC AUTO-LOGIN (RAHSIA) ---
+# --- LOGIC AUTO-LOGIN API KEY (RAHSIA) ---
 api_key = None
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
-    st.sidebar.success("✅ API Key Dikesan (Auto-Login)")
+    st.sidebar.success("✅ API Key Dikesan")
 else:
     api_key = st.sidebar.text_input("Masukkan Google Gemini API Key", type="password")
     if not api_key:
-        st.sidebar.warning("⚠️ Sila buat fail .streamlit/secrets.toml untuk simpan key kekal.")
+        st.sidebar.warning("⚠️ Sila set secrets.toml")
 
 # --- AUTO-DETECT MODEL ---
 available_models = []
@@ -91,7 +128,7 @@ elif "Indonesia" in market_type and not ticker.endswith(".JK"):
 # --- FUNGSI UTAMA ---
 if analyze_btn:
     if not api_key:
-        st.error("⚠️ API Key tiada. Sila masukkan di sidebar atau set secrets.toml")
+        st.error("⚠️ API Key tiada.")
     else:
         genai.configure(api_key=api_key)
         
