@@ -7,7 +7,8 @@ import io
 import pandas as pd
 from fpdf import FPDF
 import tempfile
-from datetime import datetime # <--- KIT TOOL BARU (Untuk masa)
+from datetime import datetime
+import pytz # Library untuk Zon Masa
 
 # --- SETUP HALAMAN ---
 st.set_page_config(page_title="Smart Chart AI by SEJ", layout="wide")
@@ -44,42 +45,49 @@ if not st.session_state.logged_in:
 # 🔓 APLIKASI UTAMA
 # ==========================================
 
-# --- FUNGSI BUAT PDF (UPDATED) ---
+# --- FUNGSI BUAT PDF (FIXED LAYOUT & TIMEZONE) ---
 def create_pdf(ticker, company_name, price, analysis_text, chart_image):
     pdf = FPDF()
     pdf.add_page()
     
-    # 1. Header (Tajuk)
+    # 1. Header
     pdf.set_font("Arial", 'B', 16)
     pdf.cell(0, 10, txt=f"Laporan Analisis Saham: {ticker}", ln=True, align='C')
     
-    # 2. Sub-Header (Info Syarikat & Harga)
+    # 2. Sub-Header
     pdf.set_font("Arial", 'I', 12)
     pdf.cell(0, 8, txt=f"Syarikat: {company_name} | Harga Terkini: RM {price}", ln=True, align='C')
     
-    # 3. TARIKH & MASA (BARU!) 🕒
-    current_time = datetime.now().strftime("%d/%m/%Y %I:%M %p") # Format: 24/12/2025 02:30 PM
+    # 3. Tarikh & Masa (ZON MALAYSIA) 🕒
+    # Tukar UTC server kepada Asia/Kuala_Lumpur
+    tz_MY = pytz.timezone('Asia/Kuala_Lumpur')
+    current_time = datetime.now(tz_MY).strftime("%d/%m/%Y %I:%M %p") # Format: 24/12/2025 02:30 PM
+    
     pdf.set_font("Arial", '', 10)
-    pdf.set_text_color(100, 100, 100) # Warna kelabu sikit
-    pdf.cell(0, 8, txt=f"Dijana pada: {current_time}", ln=True, align='C')
-    pdf.set_text_color(0, 0, 0) # Reset warna hitam
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 8, txt=f"Dijana pada: {current_time} (Masa Malaysia)", ln=True, align='C')
+    pdf.set_text_color(0, 0, 0)
     pdf.ln(5)
     
-    # 4. Masukkan Gambar Chart
+    # 4. Gambar Chart
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_file:
         chart_image.save(tmp_file.name)
-        # Center image: (A4 width 210mm - image width 180mm) / 2 = 15mm margin
-        pdf.image(tmp_file.name, x=15, y=pdf.get_y(), w=180)
+        # Simpan posisi Y sekarang
+        y_start = pdf.get_y()
+        # Letak gambar
+        pdf.image(tmp_file.name, x=15, y=y_start, w=180)
     
-    # Pindah cursor ke bawah gambar (agak-agak tinggi gambar)
-    pdf.ln(105) 
+    # 5. Jarakkan Teks (FIX BERTINDIH) 📏
+    # Kita turun ke bawah sebanyak 130 unit dari posisi gambar bermula
+    # Ini memberi ruang luas untuk graf + label paksi X
+    pdf.set_y(y_start + 130) 
     
-    # 5. Masukkan Teks Analisis
+    # 6. Teks Analisis
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, txt="Ulasan & Strategi AI:", ln=True, align='L')
     pdf.set_font("Arial", size=11)
     
-    # Bersihkan teks untuk PDF
+    # Bersihkan teks
     clean_text = analysis_text.replace("*", "").replace("#", "")
     clean_text = clean_text.encode('latin-1', 'replace').decode('latin-1')
     
@@ -157,6 +165,7 @@ def format_large_number(num):
     elif num >= 1_000_000: return f"{num / 1_000_000:.2f}M"
     return str(num)
 
+# --- PROSES ANALISIS ---
 if analyze_btn:
     if not api_key:
         st.error("⚠️ API Key tiada.")
@@ -235,13 +244,15 @@ if analyze_btn:
                             
                             # --- BUTANG DOWNLOAD PDF ---
                             st.divider()
-                            # Kita bagi info tarikh masa akan dijana dalam fungsi create_pdf
+                            # Generate masa untuk nama fail (Format TahunBulanHari)
+                            file_time_str = datetime.now(pytz.timezone('Asia/Kuala_Lumpur')).strftime('%Y%m%d')
+                            
                             pdf_bytes = create_pdf(ticker, company_name, f"{last_price:.2f}", response.text, image)
                             
                             st.download_button(
                                 label="📥 Download Laporan PDF",
                                 data=pdf_bytes,
-                                file_name=f"Analisis_{ticker}_{datetime.now().strftime('%Y%m%d')}.pdf",
+                                file_name=f"Analisis_{ticker}_{file_time_str}.pdf",
                                 mime="application/pdf"
                             )
 
