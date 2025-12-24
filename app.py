@@ -7,6 +7,7 @@ import io
 import pandas as pd
 from fpdf import FPDF
 import tempfile
+from datetime import datetime # <--- KIT TOOL BARU (Untuk masa)
 
 # --- SETUP HALAMAN ---
 st.set_page_config(page_title="Smart Chart AI by SEJ", layout="wide")
@@ -43,38 +44,46 @@ if not st.session_state.logged_in:
 # 🔓 APLIKASI UTAMA
 # ==========================================
 
-# --- FUNGSI BUAT PDF ---
+# --- FUNGSI BUAT PDF (UPDATED) ---
 def create_pdf(ticker, company_name, price, analysis_text, chart_image):
     pdf = FPDF()
     pdf.add_page()
+    
+    # 1. Header (Tajuk)
     pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 10, txt=f"Laporan Analisis Saham: {ticker}", ln=True, align='C')
     
-    # Tajuk
-    pdf.cell(200, 10, txt=f"Laporan Analisis Saham: {ticker}", ln=True, align='C')
+    # 2. Sub-Header (Info Syarikat & Harga)
     pdf.set_font("Arial", 'I', 12)
-    pdf.cell(200, 10, txt=f"Syarikat: {company_name} | Harga: {price}", ln=True, align='C')
-    pdf.ln(10)
+    pdf.cell(0, 8, txt=f"Syarikat: {company_name} | Harga Terkini: RM {price}", ln=True, align='C')
     
-    # Masukkan Gambar Chart
-    # Kita perlu simpan gambar sementara (temp) sebab FPDF nak baca fail
+    # 3. TARIKH & MASA (BARU!) 🕒
+    current_time = datetime.now().strftime("%d/%m/%Y %I:%M %p") # Format: 24/12/2025 02:30 PM
+    pdf.set_font("Arial", '', 10)
+    pdf.set_text_color(100, 100, 100) # Warna kelabu sikit
+    pdf.cell(0, 8, txt=f"Dijana pada: {current_time}", ln=True, align='C')
+    pdf.set_text_color(0, 0, 0) # Reset warna hitam
+    pdf.ln(5)
+    
+    # 4. Masukkan Gambar Chart
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_file:
         chart_image.save(tmp_file.name)
-        pdf.image(tmp_file.name, x=15, y=40, w=180)
+        # Center image: (A4 width 210mm - image width 180mm) / 2 = 15mm margin
+        pdf.image(tmp_file.name, x=15, y=pdf.get_y(), w=180)
     
-    # Pindah ke bawah gambar
-    pdf.set_y(150)
+    # Pindah cursor ke bawah gambar (agak-agak tinggi gambar)
+    pdf.ln(105) 
     
-    # Masukkan Teks Analisis
+    # 5. Masukkan Teks Analisis
     pdf.set_font("Arial", 'B', 14)
-    pdf.cell(200, 10, txt="Ulasan AI:", ln=True, align='L')
+    pdf.cell(0, 10, txt="Ulasan & Strategi AI:", ln=True, align='L')
     pdf.set_font("Arial", size=11)
     
-    # Bersihkan teks (buang emoji/bold markdown yang tak support PDF biasa)
+    # Bersihkan teks untuk PDF
     clean_text = analysis_text.replace("*", "").replace("#", "")
-    # Encode latin-1 untuk elak error huruf pelik, ignore jika error
     clean_text = clean_text.encode('latin-1', 'replace').decode('latin-1')
     
-    pdf.multi_cell(0, 7, txt=clean_text)
+    pdf.multi_cell(0, 6, txt=clean_text)
     
     return pdf.output(dest='S').encode('latin-1')
 
@@ -154,86 +163,3 @@ if analyze_btn:
     else:
         genai.configure(api_key=api_key)
         with st.spinner(f"Sedang mengumpul data {ticker}..."):
-            try:
-                ticker_obj = yf.Ticker(ticker)
-                
-                # 1. Fundamental
-                info = ticker_obj.info
-                company_name = info.get('longName', ticker)
-                sector = info.get('sector', 'Tidak Diketahui')
-                market_cap = format_large_number(info.get('marketCap'))
-                pe_ratio = info.get('trailingPE', 'N/A')
-                div_yield = info.get('dividendYield', 0)
-                if div_yield: div_yield = f"{div_yield * 100:.2f}%"
-                else: div_yield = "0%"
-                
-                st.info(f"🏢 **{company_name}** | Sektor: {sector}")
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Market Cap", market_cap)
-                m2.metric("PE Ratio", pe_ratio if pe_ratio != 'N/A' else "-")
-                m3.metric("Dividend Yield", div_yield)
-
-                # 2. Chart Data
-                data = ticker_obj.history(period=period)
-                if data.empty:
-                    st.error(f"❌ Data Chart kosong untuk '{ticker}'.")
-                else:
-                    data = data[['Open', 'High', 'Low', 'Close', 'Volume']]
-                    data.index.name = 'Date'
-                    try: last_price = float(data['Close'].iloc[-1])
-                    except: last_price = 0.0
-
-                    # 3. Lukis Chart
-                    m_style = mpf.make_mpf_style(base_mpf_style='yahoo', rc={'font.size': 10})
-                    buf = io.BytesIO()
-                    my_hlines = dict(hlines=[last_price], colors=['red'], linestyle='dashed', linewidths=1.0)
-                    mpf.plot(data, type='candle', style=m_style, volume=True, mav=(20, 50),
-                        hlines=my_hlines, savefig=dict(fname=buf, dpi=300, bbox_inches='tight'),
-                        title=f"\n{ticker} - Price: {last_price:.2f}", tight_layout=True)
-                    buf.seek(0)
-                    image = Image.open(buf)
-                    
-                    with col2:
-                        st.image(image, use_container_width=True, caption=f"Carta Harian: {company_name}")
-                    
-                    # 4. AI Analysis
-                    with st.spinner(f"🤖 AI sedang menulis laporan..."):
-                        model = genai.GenerativeModel(selected_model)
-                        prompt = f"""
-                        Bertindak sebagai Pengurus Dana Professional.
-                        
-                        DATA FUNDAMENTAL:
-                        - Nama: {company_name} | Sektor: {sector}
-                        - Market Cap: {market_cap} | PE Ratio: {pe_ratio} | Dividen: {div_yield}
-
-                        DATA TEKNIKAL:
-                        - Harga Semasa: {last_price:.2f}
-                        - Biru = EMA 20, Oren = EMA 50.
-
-                        Analisis dalam Bahasa Melayu:
-                        1. **Fundamental**: Syarikat kukuh/mahal/murah?
-                        2. **Teknikal**: Trend Uptrend/Downtrend?
-                        3. **Plan**: Target Profit & Stop Loss.
-                        4. **Keputusan**: BUY / SELL / WAIT?
-                        """
-                        response = model.generate_content([prompt, image])
-                        
-                        # Papar Analisis
-                        with col2:
-                            st.divider()
-                            st.subheader("📊 Analisis Penuh:")
-                            st.markdown(response.text)
-                            
-                            # --- BUTANG DOWNLOAD PDF (FEATURE BARU) ---
-                            st.divider()
-                            pdf_bytes = create_pdf(ticker, company_name, f"{last_price:.2f}", response.text, image)
-                            
-                            st.download_button(
-                                label="📥 Download Laporan PDF",
-                                data=pdf_bytes,
-                                file_name=f"Analisis_{ticker}.pdf",
-                                mime="application/pdf"
-                            )
-
-            except Exception as e:
-                st.error(f"Ralat Sistem: {e}")
