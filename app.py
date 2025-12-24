@@ -16,23 +16,25 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 def check_login():
-    # Ambil username/password dari secrets
-    # Jika tiada dalam secrets, guna default 'admin'/'admin' (fail-safe)
-    sec_user = st.secrets.get("APP_USERNAME", "admin")
-    sec_pass = st.secrets.get("APP_PASSWORD", "admin")
-
     st.title("🔒 Login Diperlukan")
-    st.markdown("Sila masukkan ID Pengguna untuk akses sistem **Smart Chart AI by SEJ**.")
+    st.markdown("Sila masukkan ID Pengguna untuk akses sistem.")
 
     col1, col2 = st.columns(2)
     with col1:
         username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
+        password = st.text_input("password", type="password")
         
         if st.button("Masuk Sistem 🚀"):
-            if username == sec_user and password == sec_pass:
+            # 1. Ambil senarai passwords dari secrets
+            # Jika tiada, buat dictionary kosong (fail-safe)
+            users_db = st.secrets.get("passwords", {})
+
+            # 2. Check adakah username wujud & password betul
+            if username in users_db and users_db[username] == password:
                 st.session_state.logged_in = True
-                st.rerun() # Refresh page untuk masuk
+                st.session_state.current_user = username # Simpan nama siapa yang login
+                st.rerun()
+                
             else:
                 st.error("❌ Username atau Password salah!")
 
@@ -46,10 +48,8 @@ if not st.session_state.logged_in:
 # ==========================================
 
 # --- HEADER & SIDEBAR ---
-st.sidebar.markdown("## 👨‍💻 Pencipta: **SEJ**")
-if st.sidebar.button("Log Keluar (Logout)"):
-    st.session_state.logged_in = False
-    st.rerun()
+current_user = st.session_state.get("current_user", "Tetamu")
+st.sidebar.markdown(f"## 👤 Pengguna: **{current_user.upper()}**")
 
 st.sidebar.divider()
 st.sidebar.title("⚙️ Tetapan")
